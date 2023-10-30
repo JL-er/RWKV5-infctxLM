@@ -27,16 +27,53 @@ class train_callback(pl.Callback):
         super().__init__()
         self.args = args
 
+    def on_fit_start(self, trainer, pl_module) -> None:
+        args = self.args
+
+        # if trainer.train_dataloader:
+        #     trainer.train_dataloader.dataset.datasets.global_rank = trainer.global_rank
+        #     trainer.train_dataloader.dataset.datasets.world_size = trainer.world_size
+        # if trainer.val_dataloaders:
+        #     for dataloader in trainer.val_dataloaders:
+        #         dataloader.dataset.datasets.global_rank = trainer.global_rank
+        #         dataloader.dataset.datasets.world_size = trainer.world_size
+        if trainer.is_global_zero:  # logging
+            trainer.my_loss=0.
+            trainer.my_backward_step = 0
+            trainer.my_loss_sum = 0
+            trainer.my_loss_count = 0
+            trainer.my_token_count=0
+            trainer.my_log = open(args.proj_dir + "/train_log.txt", "a")
+            trainer.my_log.write(f"NEW RUN {args.my_timestamp}\n{vars(self.args)}\n")
+            try:
+                print(f"\n{trainer.strategy.config}\n")
+                trainer.my_log.write(f"{trainer.strategy.config}\n")
+            except:
+                pass
+            trainer.my_log.flush()
+            if len(args.wandb) > 0:
+                print("Login to wandb...")
+                import wandb
+                wandb.init(
+                    project=args.wandb,
+                    name=args.run_name + " " + args.my_timestamp,
+                    config=args,
+                    save_code=False,
+                )
+                trainer.my_wandb = wandb
+
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
         args = self.args
         # if args.cuda_cleanup > 0:
         #     torch.cuda.empty_cache()
-        real_step = trainer.global_step + args.epoch_begin * args.epoch_steps
+        real_step = trainer.global_step + args.previous_step#args.epoch_begin * args.epoch_steps
 
         # LR schedule
         w_step = args.warmup_steps
         if args.lr_final == args.lr_init or args.epoch_count == 0:
             lr = args.lr_init
+            if trainer.global_step < w_step:
+                lr = lr * (0.2 + 0.8 * trainer.global_step / w_step)
         else:
             decay_step = real_step - args.my_pile_edecay * args.epoch_steps
             decay_total = (args.epoch_count - args.my_pile_edecay) * args.epoch_steps
@@ -47,39 +84,13 @@ class train_callback(pl.Callback):
                 lr = args.lr_init + (args.lr_final - args.lr_init) * progress
             else:  # exp decay
                 lr = args.lr_init * math.exp(math.log(args.lr_final / args.lr_init) * pow(progress, 1))
+
+            if trainer.global_step < w_step:
+                lr = lr * (0.2 + 0.8 * trainer.global_step / w_step)
             # if trainer.is_global_zero:
             #     print(trainer.global_step, decay_step, decay_total, w_step, progress, lr)
 
-        if args.my_exit_tokens != 0: # cosine decay
-            real_tokens = real_step * args.ctx_len * args.real_bsz
-            warmup_tokens = w_step * args.ctx_len * args.real_bsz
-            progress = (real_tokens - warmup_tokens) / (abs(args.my_exit_tokens) - warmup_tokens)
-            progress = max(0, min(1, progress))
-            lr_final_factor = args.lr_final / args.lr_init                
-            lr_mult = (0.5 + lr_final_factor / 2) + (0.5 - lr_final_factor / 2) * math.cos(math.pi * progress)
-            if args.my_exit_tokens > 0:
-                lr = args.lr_init * lr_mult
-            else:
-                lr = (lr + args.lr_init * lr_mult) / 2
-            if progress >= 1:
-                if (trainer.is_global_zero) or ('deepspeed_stage_3' in args.strategy):
-                    my_save(
-                        args, trainer,
-                        pl_module.state_dict(),
-                        f"{args.proj_dir}/rwkv-final.pth",
-                    )
-                    exit(0)
-        if trainer.global_step < w_step:
-            lr = lr * (0.2 + 0.8 * trainer.global_step / w_step)
-
-        if args.weight_decay_final > 0:
-            wd_now = args.weight_decay * math.exp(math.log(args.weight_decay_final / args.weight_decay) * progress)
-        else:
-            wd_now = args.weight_decay
-
         for param_group in trainer.optimizers[0].param_groups:
-            if param_group["weight_decay"] > 0:
-                param_group["weight_decay"] = wd_now
             if args.layerwise_lr > 0:
                 param_group["lr"] = lr * param_group["my_lr_scale"]
                 # print(param_group["lr"], param_group["my_lr_scale"])
@@ -87,86 +98,83 @@ class train_callback(pl.Callback):
                 param_group["lr"] = lr
 
         trainer.my_lr = lr
-        trainer.my_wd = wd_now
+        
         # rank_zero_info(f"{real_step} {lr}")
 
-        if trainer.global_step == 0:
-            if trainer.is_global_zero:  # logging
-                trainer.my_loss_sum = 0
-                trainer.my_loss_count = 0
-                trainer.my_log = open(args.proj_dir + "/train_log.txt", "a")
-                trainer.my_log.write(f"NEW RUN {args.my_timestamp}\n{vars(self.args)}\n")
-                try:
-                    print(f"\n{trainer.strategy.config}\n")
-                    trainer.my_log.write(f"{trainer.strategy.config}\n")
-                except:
-                    pass
-                trainer.my_log.flush()
-                if len(args.wandb) > 0:
-                    print("Login to wandb...")
-                    import wandb
-                    wandb.init(
-                        project=args.wandb,
-                        name=args.run_name + " " + args.my_timestamp,
-                        config=args,
-                        save_code=False,
-                    )
-                    trainer.my_wandb = wandb
+
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         args = self.args
-        token_per_step = args.ctx_len * args.real_bsz
-        real_step = trainer.global_step + args.epoch_begin * args.epoch_steps
         if trainer.is_global_zero:  # logging
             t_now = time.time_ns()
+            token_per_step = batch[0].size(0) * batch[0].size(1) * int(args.devices)
+            real_step = trainer.global_step + args.previous_step #+ args.epoch_begin * args.epoch_steps
             kt_s = 0
             try:
                 t_cost = (t_now - trainer.my_time_ns) / 1e9
                 kt_s = token_per_step / t_cost / 1000
-                self.log("REAL it/s", 1.0 / t_cost, prog_bar=True, on_step=True)
+                # self.log("REAL it/s", 1.0 / t_cost, prog_bar=True, on_step=True)
+                # self.log("wkvf",args.forward_wkv_count,prog_bar=True, on_step=True)
+                # self.log("wkvb",args.backward_wkv_count,prog_bar=True, on_step=True)
                 self.log("Kt/s", kt_s, prog_bar=True, on_step=True)
             except:
                 pass
+            trainer.my_token_count += token_per_step
             trainer.my_time_ns = t_now
-            if pl.__version__[0]=='2':
-                trainer.my_loss = outputs["loss"]
-            else:
-                trainer.my_loss = trainer.my_loss_all.float().mean().item()
-            trainer.my_loss_sum += trainer.my_loss
-            trainer.my_loss_count += 1
-            trainer.my_epoch_loss = trainer.my_loss_sum / trainer.my_loss_count
-            self.log("lr", trainer.my_lr, prog_bar=True, on_step=True)
-            self.log("loss", trainer.my_epoch_loss, prog_bar=True, on_step=True)
-            # self.log("s", real_step, prog_bar=True, on_step=True)
-
-            if len(args.wandb) > 0:
-                lll = {"loss": trainer.my_loss, "lr": trainer.my_lr, "wd": trainer.my_wd, "Gtokens": real_step * token_per_step / 1e9}
-                if kt_s > 0:
-                    lll["kt/s"] = kt_s
-                trainer.my_wandb.log(lll, step=int(real_step))
-        if (trainer.is_global_zero) or ('deepspeed_stage_3' in args.strategy): # save pth
-            if args.magic_prime > 0:
-                expand_factor = 2 if args.my_qa_mask > 0 else 1
-                if int(real_step) == int(args.magic_prime * expand_factor // args.real_bsz) - 1 + int(args.my_random_steps):
-                    to_save_dict = pl_module.state_dict()
-                    my_save(
-                        args, trainer,
-                        to_save_dict,
-                        f"{args.proj_dir}/rwkv-final.pth",
-                    )
+            # trainer.my_loss += trainer.my_loss_all.float().mean().item()/trainer.accumulate_grad_batches
+            # self.log("back",trainer.my_backward_step, prog_bar=True, on_step=True)
+            if (trainer.my_backward_step) % trainer.accumulate_grad_batches == 0:
+                trainer.my_loss_sum += trainer.my_loss
+                trainer.my_loss_count += 1
+                trainer.my_epoch_loss = trainer.my_loss_sum / trainer.my_loss_count
+                self.log("lr", trainer.my_lr, prog_bar=True, on_step=True)
+                self.log("loss", trainer.my_epoch_loss, prog_bar=True, on_step=True)
                 
+                # self.log("s", real_step, prog_bar=True, on_step=True)
+
+                if len(args.wandb) > 0:
+                    lll = {"loss": trainer.my_loss, "lr": trainer.my_lr, "Gtokens": trainer.my_token_count / 1e9}
+                    if kt_s > 0:
+                        lll["kt/s"] = kt_s
+                    trainer.my_wandb.log(lll, step=int(real_step+args.log_add_step)) #平移一下wandb曲线
+                if args.magic_prime > 0:
+                    expand_factor = 2 if args.my_qa_mask > 0 else 1
+                    if int(real_step) == int(args.magic_prime * expand_factor // args.real_bsz) - 1:
+                        to_save_dict = pl_module.state_dict()
+                        my_save(
+                            to_save_dict,
+                            f"{args.proj_dir}/rwkv-final.pth",
+                        )
+                trainer.my_loss=0.
+
 
     def on_train_epoch_start(self, trainer, pl_module):
         args = self.args
-        if pl.__version__[0]=='2':
-            dataset = trainer.train_dataloader.dataset
-        else:
-            dataset = trainer.train_dataloader.dataset.datasets
+        dataset = trainer.train_dataloader.dataset.datasets
         assert "MyDataset" in str(dataset)
         dataset.global_rank = trainer.global_rank
         dataset.real_epoch = int(args.epoch_begin + trainer.current_epoch)
         dataset.world_size = trainer.world_size
+        dataset.current_warmup_step = trainer.global_step * args.micro_bsz * (args.accumulate_grad_batches or 1)
+        if trainer.val_dataloaders:
+            for dataloader in trainer.val_dataloaders:
+                dataloader.dataset.datasets.global_rank = trainer.global_rank
+                dataloader.dataset.datasets.world_size = trainer.world_size
         # print(f'########## world_size {dataset.world_size} global_rank {dataset.global_rank} real_epoch {dataset.real_epoch} ##########')
+
+    
+
+    # def on_train_epoch_start(self, trainer, pl_module):
+    #     args = self.args
+    #     if pl.__version__[0]=='2':
+    #         dataset = trainer.train_dataloader.dataset
+    #     else:
+    #         dataset = trainer.train_dataloader.dataset.datasets
+    #     assert "MyDataset" in str(dataset)
+    #     dataset.global_rank = trainer.global_rank
+    #     dataset.real_epoch = int(args.epoch_begin + trainer.current_epoch)
+    #     dataset.world_size = trainer.world_size
+    #     # print(f'########## world_size {dataset.world_size} global_rank {dataset.global_rank} real_epoch {dataset.real_epoch} ##########')
 
     def on_train_epoch_end(self, trainer, pl_module):
         args = self.args

@@ -390,13 +390,13 @@ if 'r4' in os.environ["RWKV_MY_TESTING"]:
                 ew = (-torch.exp(w.float())).contiguous()
                 eew = (torch.exp(ew)).contiguous()
                 ctx.save_for_backward(r, k, v, eew, ew, u)
-                new_state = torch.zeros((B, H, HEAD_SIZE, HEAD_SIZE), dtype=torch.float, requires_grad=False, device=r.device).contiguous()
+                new_state = torch.zeros((B, H, HEAD_SIZE, HEAD_SIZE), dtype=torch.float, requires_grad=True, device=r.device).contiguous()
                 y = torch.empty((B, T, C), device=r.device, dtype=torch.bfloat16, memory_format=torch.contiguous_format) # .uniform_(-1, 1)
                 wkv5_cuda.forward(B, T, C, H, r, k, v, eew, u, y, last_state, new_state)
                 return y, new_state
 
         @staticmethod
-        def backward(ctx, gy, gnew_state):
+        def backward(ctx, gy, _):
             with torch.no_grad():
                 assert gy.dtype == torch.bfloat16
                 B = ctx.B
@@ -916,8 +916,7 @@ class RWKV(pl.LightningModule):
                 last_wkv_states: torch.Tensor):
         args = self.args
         B, T = idx.size()
-        assert T <= args.ctx_len, "Cannot forward, model ctx_len is exhausted."
-        assert T <= T_MAX
+        assert T <= args.real_len, "Cannot forward, model ctx_len is exhausted."
         C = args.n_embd
         H =  args.dim_att // args.head_size_a
         assert C==H*args.head_size_a
@@ -1033,7 +1032,17 @@ class RWKV(pl.LightningModule):
         )
         # pdb.set_trace()
         return total_loss
-
+    
+    def training_step_end(self, batch_parts):
+        all_loss = self.all_gather(batch_parts)
+        if self.trainer.is_global_zero:
+            # self.trainer.my_loss_all = all
+            with torch.no_grad():
+                self.trainer.my_backward_step += 1
+                self.trainer.my_loss += all_loss.float().mean().item()/self.trainer.accumulate_grad_batches
+    @rank_zero_only
+    def validation_step(self, batch, batch_idx):
+        pass
     # def training_step(self, batch, batch_idx):
     #     args = self.args
     #     if args.my_qa_mask != 1:
@@ -1075,11 +1084,11 @@ class RWKV(pl.LightningModule):
 
     #     return L2Wrap.apply(loss, logits)
 
-    def training_step_end(self, batch_parts):
-        if pl.__version__[0]!='2':
-            all = self.all_gather(batch_parts)
-            if self.trainer.is_global_zero:
-                self.trainer.my_loss_all = all
+    # def training_step_end(self, batch_parts):
+    #     if pl.__version__[0]!='2':
+    #         all = self.all_gather(batch_parts)
+    #         if self.trainer.is_global_zero:
+    #             self.trainer.my_loss_all = all
 
     def generate_init_weight(self):
         print(

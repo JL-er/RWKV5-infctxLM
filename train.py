@@ -119,6 +119,7 @@ if __name__ == "__main__":
     parser.add_argument("--my_testing", default='', type=str)
     parser.add_argument("--my_exit", default=99999999, type=int)
     parser.add_argument("--my_exit_tokens", default=0, type=int)
+    parser.add_argument("--previous_step", default=None, type=int)
 
     if pl.__version__[0]=='2':
         parser.add_argument("--accelerator", default="gpu", type=str)
@@ -151,6 +152,8 @@ if __name__ == "__main__":
     # os.environ["WDS_SHOW_SEED"] = "1"
 
     args.my_timestamp = datetime.datetime.today().strftime("%Y-%m-%d-%H-%M-%S")
+    if args.previous_step is None:
+        args.previous_step = args.epoch_begin * args.epoch_steps
     args.enable_checkpointing = False
     args.replace_sampler_ddp = False
     args.logger = False
