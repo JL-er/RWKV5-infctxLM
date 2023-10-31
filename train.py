@@ -120,6 +120,7 @@ if __name__ == "__main__":
     parser.add_argument("--my_exit", default=99999999, type=int)
     parser.add_argument("--my_exit_tokens", default=0, type=int)
     parser.add_argument("--previous_step", default=None, type=int)
+    parser.add_argument("--log_add_step", default=0, type=int)  # 单纯平移曲线
 
     if pl.__version__[0]=='2':
         parser.add_argument("--accelerator", default="gpu", type=str)
