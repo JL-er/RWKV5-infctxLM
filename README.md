@@ -5,3 +5,7 @@ python train.py --my_testing r3r4 --load_model /home/asd/model/RWKV-5-World-1B5-
 ctx_len 为你想要的训练长度  4096
 real_len 受显存限制为实际训练长度 1024
 ttt 测试文件
+
+本项目实现了rwkv5的无限长度训练，但由于没有理解bo v5backward的一些设计所以目前断点回传梯度时fallback会出现掉点，需改进backward
+本项目由wanicca版本的https://github.com/xiaol/Train-infctx-RWKV.git和Blealtan的https://github.com/RWKV/RWKV-infctx-trainer.git
+我只是修改了rwkv5算子部分，以及移植代码，非常感谢Blealtan老师的耐心指导和交流。
