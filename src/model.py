@@ -390,7 +390,7 @@ if 'r4' in os.environ["RWKV_MY_TESTING"]:
                 ew = (-torch.exp(w.float())).contiguous()
                 eew = (torch.exp(ew)).contiguous()
                 ctx.save_for_backward(r, k, v, eew, ew, u)
-                new_state = torch.zeros((B, H, HEAD_SIZE, HEAD_SIZE), dtype=torch.float, requires_grad=True, device=r.device).contiguous()
+                new_state = torch.zeros((B, H, HEAD_SIZE, HEAD_SIZE), dtype=torch.float, requires_grad=False, device=r.device).contiguous()
                 y = torch.empty((B, T, C), device=r.device, dtype=torch.bfloat16, memory_format=torch.contiguous_format) # .uniform_(-1, 1)
                 wkv5_cuda.forward(B, T, C, H, r, k, v, eew, u, y, last_state, new_state)
                 return y, new_state
