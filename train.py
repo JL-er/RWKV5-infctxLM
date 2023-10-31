@@ -133,7 +133,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     ########################################################################################################
-
+    from src.trainer import train_callback, generate_init_weight,my_save
     import os, warnings, math, datetime, sys, time
     import numpy as np
     import torch
@@ -381,8 +381,28 @@ if __name__ == "__main__":
     if "deepspeed" in args.strategy:
         trainer.strategy.config["zero_optimization"]["allgather_bucket_size"] = args.ds_bucket_mb * 1000 * 1000
         trainer.strategy.config["zero_optimization"]["reduce_bucket_size"] = args.ds_bucket_mb * 1000 * 1000
-
+    
     # must set shuffle=False, persistent_workers=False (because worker is in another thread)
     data_loader = DataLoader(train_data, shuffle=False, pin_memory=True, batch_size=args.micro_bsz, num_workers=1, persistent_workers=False, drop_last=True)
 
+    import atexit
+    def leave_script(env):
+        # print(dir(),globals())
+        if args.data_type == 'wds_img':
+            raw_dict = model.state_dict()
+            to_save_dict = {}
+            for k in raw_dict:
+                if k.startswith('encoder.') or k.startswith('decoder.'):
+                    to_save_dict[k] = raw_dict[k]
+        else:
+            to_save_dict = model.state_dict()
+
+        try:
+            my_save(
+                to_save_dict,
+                f"{args.proj_dir}/rwkv-last.pth",
+            )
+        except Exception as e:
+            print('Error\n\n', e, '\n\n')
+    atexit.register(leave_script,args)
     trainer.fit(model, data_loader)
