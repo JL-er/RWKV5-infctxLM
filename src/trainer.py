@@ -169,33 +169,41 @@ class train_callback(pl.Callback):
 
     def on_train_epoch_end(self, trainer, pl_module):
         args = self.args
-        to_save_dict = {}
-        if (trainer.is_global_zero) or ('deepspeed_stage_3' in args.strategy):  # save pth
-            if (args.epoch_save > 0 and trainer.current_epoch % args.epoch_save == 0) or (trainer.current_epoch == args.epoch_count - 1):
+        if trainer.is_global_zero:  # logging & save state_dict
+            if (args.epoch_save > 0 and trainer.current_epoch % args.epoch_save == 0) or trainer.current_epoch == args.epoch_count - 1:
                 if args.data_type == 'wds_img':
                     raw_dict = pl_module.state_dict()
+                    to_save_dict = {}
                     for k in raw_dict:
                         if k.startswith('encoder.') or k.startswith('decoder.'):
                             to_save_dict[k] = raw_dict[k]
                 else:
                     to_save_dict = pl_module.state_dict()
+
+                if args.lora:
+                    LORA_CONFIG = args.LORA_CONFIG
+                    enable_time_finetune = 'time' in LORA_CONFIG["parts"]
+                    enable_ln_finetune = 'ln' in LORA_CONFIG["parts"]
+                    lora_dict = {}
+                    for name, state in to_save_dict.items():
+                        if ('.lora_' in name
+                                or (enable_time_finetune and '.time_' in name)
+                                or (enable_ln_finetune and '.ln' in name)):
+                            lora_dict[name] = state
+                    to_save_dict = lora_dict
+
                 try:
                     my_save(
-                        args, trainer,
                         to_save_dict,
-                        f"{args.proj_dir}/rwkv-{args.epoch_begin + trainer.current_epoch}.pth",
+                        f"{args.proj_dir}/rwkv-{args.epoch_begin + trainer.current_epoch}-{trainer.global_step+self.args.previous_step}.pth",
                     )
                 except Exception as e:
                     print('Error\n\n', e, '\n\n')
-
-        if trainer.is_global_zero:  # logging
             trainer.my_log.write(f"{args.epoch_begin + trainer.current_epoch} {trainer.my_epoch_loss:.6f} {math.exp(trainer.my_epoch_loss):.4f} {trainer.my_lr:.8f} {datetime.datetime.now()} {trainer.current_epoch}\n")
             trainer.my_log.flush()
 
             trainer.my_loss_sum = 0
             trainer.my_loss_count = 0
-            if (args.epoch_begin + trainer.current_epoch) >= args.my_exit:
-                exit(0)
 
 
 @rank_zero_only
