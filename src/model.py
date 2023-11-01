@@ -1003,7 +1003,7 @@ class RWKV(pl.LightningModule):
         total_loss = torch.tensor(0.,dtype=self.emb.weight.dtype).requires_grad_()
         token_amount = 0
         i = 0
-        for i in range(math.ceil(T / T_train)-1):
+        for i in range(math.ceil(T / T_train)):
             # pdb.set_trace()
             # total_loss, states, token_amount = deepspeed.checkpointing.checkpoint(
             total_loss,new_shift_states, new_wkv_states,token_amount = torch_checkpoint(
@@ -1022,14 +1022,14 @@ class RWKV(pl.LightningModule):
             #     tokenizer = transformers.PreTrainedTokenizerFast(tokenizer_file="20B_tokenizer.json")
             #     pdb.set_trace()
         # pdb.set_trace()
-        total_loss, new_shift_states, new_wkv_states, token_amount = checkpointed_step(
-            idx[:, i * T_train:(i + 1) * T_train],
-            targets[:, i * T_train:(i + 1) * T_train],
-            total_loss,
-            states.shift_states,
-            states.wkv_states,
-            token_amount
-        )
+        # total_loss, new_shift_states, new_wkv_states, token_amount = checkpointed_step(
+        #     idx[:, i * T_train:(i + 1) * T_train],
+        #     targets[:, i * T_train:(i + 1) * T_train],
+        #     total_loss,
+        #     states.shift_states,
+        #     states.wkv_states,
+        #     token_amount
+        # )
         # pdb.set_trace()
         return total_loss
     

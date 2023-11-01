@@ -180,17 +180,17 @@ class train_callback(pl.Callback):
                 else:
                     to_save_dict = pl_module.state_dict()
 
-                if args.lora:
-                    LORA_CONFIG = args.LORA_CONFIG
-                    enable_time_finetune = 'time' in LORA_CONFIG["parts"]
-                    enable_ln_finetune = 'ln' in LORA_CONFIG["parts"]
-                    lora_dict = {}
-                    for name, state in to_save_dict.items():
-                        if ('.lora_' in name
-                                or (enable_time_finetune and '.time_' in name)
-                                or (enable_ln_finetune and '.ln' in name)):
-                            lora_dict[name] = state
-                    to_save_dict = lora_dict
+                # if args.lora:
+                #     LORA_CONFIG = args.LORA_CONFIG
+                #     enable_time_finetune = 'time' in LORA_CONFIG["parts"]
+                #     enable_ln_finetune = 'ln' in LORA_CONFIG["parts"]
+                #     lora_dict = {}
+                #     for name, state in to_save_dict.items():
+                #         if ('.lora_' in name
+                #                 or (enable_time_finetune and '.time_' in name)
+                #                 or (enable_ln_finetune and '.ln' in name)):
+                #             lora_dict[name] = state
+                #     to_save_dict = lora_dict
 
                 try:
                     my_save(
