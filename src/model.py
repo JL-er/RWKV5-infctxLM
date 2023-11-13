@@ -979,9 +979,7 @@ class RWKV(pl.LightningModule):
         assert C==H*args.head_size_a
         states = BlockStateList.create(args.n_layer, B, C, H, idx.device,
             self.emb.weight.dtype)
-        # init_states = states
-        # init_states.shift_states.requires_grad_()
-        # init_states.wkv_states.requires_grad_()
+
         def checkpointed_step(idx, targets, prev_loss, last_shift_states,
                               last_wkv_states, prev_token_amount):
             logits, new_shift_states, new_wkv_states = self(idx, last_shift_states, last_wkv_states)
@@ -1004,8 +1002,8 @@ class RWKV(pl.LightningModule):
         token_amount = 0
         i = 0
         for i in range(math.ceil(T / T_train)):
-            # pdb.set_trace()
-            # total_loss, states, token_amount = deepspeed.checkpointing.checkpoint(
+            states.shift_states = states.shift_states.cuda()
+            states.wkv_states = states.wkv_states.cuda()
             total_loss,new_shift_states, new_wkv_states,token_amount = torch_checkpoint(
                 checkpointed_step,
                 idx[:, i * T_train:(i + 1) * T_train],
@@ -1016,21 +1014,10 @@ class RWKV(pl.LightningModule):
                 token_amount,
                 # use_reentrant=False
             )
+            new_shift_states = new_shift_states.cpu()
+            new_wkv_states = new_wkv_states.cpu()
             states = BlockStateList(new_shift_states, new_wkv_states)
-            # if total_loss.isnan().all():
-            #     import transformers
-            #     tokenizer = transformers.PreTrainedTokenizerFast(tokenizer_file="20B_tokenizer.json")
-            #     pdb.set_trace()
-        # pdb.set_trace()
-        # total_loss, new_shift_states, new_wkv_states, token_amount = checkpointed_step(
-        #     idx[:, i * T_train:(i + 1) * T_train],
-        #     targets[:, i * T_train:(i + 1) * T_train],
-        #     total_loss,
-        #     states.shift_states,
-        #     states.wkv_states,
-        #     token_amount
-        # )
-        # pdb.set_trace()
+           
         return total_loss
     
     def training_step_end(self, batch_parts):
@@ -1043,52 +1030,7 @@ class RWKV(pl.LightningModule):
     @rank_zero_only
     def validation_step(self, batch, batch_idx):
         pass
-    # def training_step(self, batch, batch_idx):
-    #     args = self.args
-    #     if args.my_qa_mask != 1:
-    #         idx, targets = batch
-    #         logits = self(idx)
-    #         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-    #         # if '0' in os.environ["RWKV_MY_TESTING"]:
-    #         #     print('logits', logits)
-    #         #     torch.set_printoptions(threshold=10000)
-    #         #     print('idx', idx)
-    #         #     exit(0)
-    #     else:
-    #         idx, targets, mask = batch
-    #         mask = mask.view(-1)
-    #         sum_mask = torch.sum(mask).item()
-    #         # if sum_mask == 0:
-    #         #     return torch.tensor([0.0], requires_grad=True)
-
-    #         logits = self(idx)
-    #         if sum_mask == mask.shape[0]:
-    #             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-    #             # print('rank', self.global_rank, 'loss', loss.item())
-    #         else:
-    #             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), reduction='none')
-    #             # loss_raw = loss
-    #             loss = torch.sum(loss * mask) / sum_mask
-
-    #             # torch.set_printoptions(threshold=10000)
-    #             # if True: #self.global_rank == 1:
-    #             #     tmp = ''
-    #             #     sss = 0
-    #             #     ccc = 0
-    #             #     for i in range(mask.shape[0]):
-    #             #         if mask[i] > 0:
-    #             #             tmp += str(idx.view(-1)[i].item()) + ','
-    #             #             sss += loss_raw.view(-1)[i].float().item()
-    #             #             ccc += 1
-    #             #     print('rank', self.global_rank, 'loss', loss.item(), 'lavg', sss / ccc)#, 'tmp', tmp, 'input', idx)
-
-    #     return L2Wrap.apply(loss, logits)
-
-    # def training_step_end(self, batch_parts):
-    #     if pl.__version__[0]!='2':
-    #         all = self.all_gather(batch_parts)
-    #         if self.trainer.is_global_zero:
-    #             self.trainer.my_loss_all = all
+    
 
     def generate_init_weight(self):
         print(
