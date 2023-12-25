@@ -825,7 +825,10 @@ class RWKV(pl.LightningModule):
 
         self.emb = nn.Embedding(args.vocab_size, args.n_embd)
 
-        self.blocks = nn.ModuleList([Block(args, i) for i in range(args.n_layer)])
+        if args.zero3 == 1:
+            self.blocks = nn.ModuleList([Block(args, i) for i in range(args.n_layer)]).cuda()
+        else:
+            self.blocks = nn.ModuleList([Block(args, i) for i in range(args.n_layer)])
 
         self.ln_out = nn.LayerNorm(args.n_embd)
         self.head = nn.Linear(args.n_embd, args.vocab_size, bias=False)

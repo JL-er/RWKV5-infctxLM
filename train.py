@@ -122,6 +122,8 @@ if __name__ == "__main__":
     parser.add_argument("--previous_step", default=None, type=int)
     parser.add_argument("--log_add_step", default=0, type=int)  # 单纯平移曲线
 
+    parser.add_argument("--zero3", default=0, type=int) #内存小于显存时1
+
     if pl.__version__[0]=='2':
         parser.add_argument("--accelerator", default="gpu", type=str)
         parser.add_argument("--strategy", default="auto", type=str)
