@@ -6,7 +6,7 @@ ctx_len 为你想要的训练长度  4096
 real_len 受显存限制为实际训练长度 1024
 ttt 测试文件
 
-# 项目说明
+# 项目说明/Project Description Translation:
 
 The project has successfully achieved infinite-length training for rwkv5. However, due to a lack of understanding of some design aspects in bo v5backward, there are issues with gradient fallback during breakpoint backpropagation, resulting in gradient drops. Improvement is needed in the backward process.\
 本项目实现了rwkv5的无限长度训练，但由于没有理解bo v5backward的一些设计所以目前断点回传梯度时fallback会出现掉点，需改进backward\
