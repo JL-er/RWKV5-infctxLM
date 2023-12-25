@@ -1005,8 +1005,8 @@ class RWKV(pl.LightningModule):
         token_amount = 0
         i = 0
         for i in range(math.ceil(T / T_train)):
-            states.shift_states = states.shift_states.cuda()
-            states.wkv_states = states.wkv_states.cuda()
+            # states.shift_states = states.shift_states.cuda()
+            # states.wkv_states = states.wkv_states.cuda()
             total_loss,new_shift_states, new_wkv_states,token_amount = torch_checkpoint(
                 checkpointed_step,
                 idx[:, i * T_train:(i + 1) * T_train],
@@ -1017,8 +1017,8 @@ class RWKV(pl.LightningModule):
                 token_amount,
                 # use_reentrant=False
             )
-            new_shift_states = new_shift_states.cpu()
-            new_wkv_states = new_wkv_states.cpu()
+            # new_shift_states = new_shift_states.cpu()
+            # new_wkv_states = new_wkv_states.cpu()
             states = BlockStateList(new_shift_states, new_wkv_states)
            
         return total_loss
